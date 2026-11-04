@@ -46,6 +46,12 @@ The selected row is grounded and the selected column is pulled up to 3.3 V, so t
 
 Options: `--flip-chest` / `--flip-back` to mirror a heatmap, `--log reps.csv --label wide_grip` to save labeled frames, `--no-values` to hide cell numbers.
 
+## Dashboard
+
+![Dashboard](docs/dashboard.png)
+
+Smooth heatmaps with auto-brightness, center of pressure (ring), left/right balance bars, and total pressure over the last 10 s (one bump per rep). Keys: `c` recalibrate, `v` show cell values, `s` smooth/blocky, `f` freeze.
+
 ## Data format
 
 One line per frame at 250000 baud:

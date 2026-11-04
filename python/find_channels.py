@@ -26,8 +26,17 @@ STABLE = 4         # frames the same pair must win in a row
 
 
 def frame():
+    start, warned = time.time(), False
     while True:
         parts = ser.readline().decode(errors="ignore").strip().split(",")
+        if not warned and time.time() - start > 4:
+            warned = True
+            if parts and parts[0] == "F":
+                print("!! The ESP32 is running the heatmap code, not the channel finder.\n"
+                      "   Upload firmware/channel_finder/channel_finder.ino, then rerun.")
+            else:
+                print("!! No data from the ESP32. Close the Serial Monitor / other scripts,\n"
+                      "   check the port, press EN on the board, then rerun.")
         if len(parts) == 257 and parts[0] == "M":
             try:
                 return np.array(parts[1:], dtype=float).reshape(16, 16) / 1000

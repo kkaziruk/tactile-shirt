@@ -32,14 +32,21 @@ const uint8_t ROW_SEL[4] = {21, 22, 23, 14};  // row / ground mux S0-S3
 #define ROWS 6
 #define COLS 7
 
-// Mux channel each strip is soldered to, [sensor][strip]. Edit to match.
+// Which mux channel each physical strip is on, [sensor][strip].
+// Run python/find_channels.py with the channel_finder sketch to get these.
+//   ROW_STRIP: channel of physical rows R1..R6 (top to bottom)
+//   COL_STRIP: channel of physical columns C1..C7 (left to right)
+//   TRANSPOSED = 1: the row strips are on the COLUMN mux and the column
+//                   strips on the ROW mux (strips swapped between muxes).
 #if TWO_MUX
-const uint8_t ROW_CH[2][ROWS] = {{0, 1, 2, 3, 4, 5}, {6, 7, 8, 9, 10, 11}};
-const uint8_t COL_CH[2][COLS] = {{0, 1, 2, 3, 4, 5, 6}, {7, 8, 9, 10, 11, 12, 13}};
+const uint8_t TRANSPOSED[2] = {0, 0};
+const uint8_t ROW_STRIP[2][ROWS] = {{0, 1, 2, 3, 4, 5}, {6, 7, 8, 9, 10, 11}};
+const uint8_t COL_STRIP[2][COLS] = {{0, 1, 2, 3, 4, 5, 6}, {7, 8, 9, 10, 11, 12, 13}};
 const uint8_t ADC_PIN[2] = {ADC_CHEST, ADC_CHEST};
 #else
-const uint8_t ROW_CH[2][ROWS] = {{0, 1, 2, 3, 4, 5}, {0, 1, 2, 3, 4, 5}};
-const uint8_t COL_CH[2][COLS] = {{0, 1, 2, 3, 4, 5, 6}, {0, 1, 2, 3, 4, 5, 6}};
+const uint8_t TRANSPOSED[2] = {0, 0};
+const uint8_t ROW_STRIP[2][ROWS] = {{0, 1, 2, 3, 4, 5}, {0, 1, 2, 3, 4, 5}};
+const uint8_t COL_STRIP[2][COLS] = {{0, 1, 2, 3, 4, 5, 6}, {0, 1, 2, 3, 4, 5, 6}};
 const uint8_t ADC_PIN[2] = {ADC_CHEST, ADC_BACK};
 #endif
 
@@ -65,30 +72,18 @@ float readVolts(uint8_t pin) {
 }
 
 void scan() {
-#if TWO_MUX
-  // Shared muxes: scan the sensors one after the other.
   for (uint8_t s = 0; s < 2; s++) {
     for (uint8_t r = 0; r < ROWS; r++) {
-      selectChannel(ROW_SEL, ROW_CH[s][r]);
       for (uint8_t c = 0; c < COLS; c++) {
-        selectChannel(COL_SEL, COL_CH[s][c]);
+        uint8_t rowMux = TRANSPOSED[s] ? COL_STRIP[s][c] : ROW_STRIP[s][r];
+        uint8_t colMux = TRANSPOSED[s] ? ROW_STRIP[s][r] : COL_STRIP[s][c];
+        selectChannel(ROW_SEL, rowMux);
+        selectChannel(COL_SEL, colMux);
         delayMicroseconds(SETTLE_US);
         volts[s][r][c] = readVolts(ADC_PIN[s]);
       }
     }
   }
-#else
-  // Separate muxes on shared select lines: read both sensors at once.
-  for (uint8_t r = 0; r < ROWS; r++) {
-    selectChannel(ROW_SEL, ROW_CH[0][r]);
-    for (uint8_t c = 0; c < COLS; c++) {
-      selectChannel(COL_SEL, COL_CH[0][c]);
-      delayMicroseconds(SETTLE_US);
-      volts[0][r][c] = readVolts(ADC_PIN[0]);
-      volts[1][r][c] = readVolts(ADC_PIN[1]);
-    }
-  }
-#endif
 }
 
 // One frame per line:

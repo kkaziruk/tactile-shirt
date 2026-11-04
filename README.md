@@ -20,6 +20,13 @@ Each sensor uses the course schematic: one **sense mux** (MUX1) and one **ground
 
 The selected horizontal strip is grounded and the selected vertical strip is pulled up to 3.3 V, so the Velostat forms a voltage divider: unpressed reads near 3.3 V, and pressing lowers the voltage. If a strip is on a different mux channel, edit `ROW_CH` / `COL_CH` at the top of the firmware.
 
+## Fastest: flash from Chrome (no Arduino IDE)
+
+1. Download `firmware/tactile_shirt_esp32.bin`.
+2. Open https://espressif.github.io/esptool-js/ in **Chrome or Edge**, plug in the ESP32, click **Connect**, and pick its port.
+3. Set **Flash Address** to `0x0`, choose the `.bin`, click **Program**. Hold **BOOT** if it won't connect.
+4. Done. Skip to step 3 below.
+
 ## Run it
 
 1. Open `firmware/tactile_shirt/tactile_shirt.ino` in Arduino IDE → Board: **ESP32 Dev Module** → Upload (hold BOOT if it stalls).

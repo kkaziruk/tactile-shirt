@@ -41,7 +41,13 @@ ap = argparse.ArgumentParser()
 ap.add_argument("port")
 ap.add_argument("--baud", type=int, default=250000)
 ap.add_argument("--calib", type=int, default=30, help="frames used for the baseline")
-ap.add_argument("--alpha", type=float, default=0.5, help="smoothing 0-1 (1 = off)")
+ap.add_argument("--alpha", type=float, default=0.75, help="smoothing 0-1 (1 = off)")
+ap.add_argument("--release", type=float, default=0.15,
+                help="leftover drops below this (V) fade out after you let go")
+ap.add_argument("--fade", type=float, default=1.5,
+                help="seconds for leftover pressure to clear")
+ap.add_argument("--no-drift", action="store_true",
+                help="keep the baseline fixed (old behaviour)")
 ap.add_argument("--threshold", type=float, default=0.03, help="ignore drops below this (V)")
 ap.add_argument("--vmin-scale", type=float, default=0.15,
                 help="lowest color ceiling (V); auto-brightness never goes below this")
@@ -124,6 +130,25 @@ def start_calibration():
     state["base"] = None
     state["calib"] = []
     state["smooth"] = [np.zeros((ROWS, COLS)), np.zeros((ROWS, COLS))]
+
+
+def track_baseline(i, raw):
+    """Clear leftover pressure after release.
+
+    Velostat recovers slowly after a press, so a small drop can linger. The
+    baseline follows the reading back up immediately, and absorbs small
+    leftover drops over ~args.fade seconds. Strong presses are left alone
+    (they only drift over ~20 s), so real pressure still shows.
+    """
+    base = state["base"][i]
+    fps = max(len(arrivals), 5)
+    drop = base - raw
+    up = drop < 0                                   # reading above baseline
+    small = (drop >= 0) & (drop < args.release)     # leftover after release
+    big = drop >= args.release
+    base[up] += 0.3 * (raw[up] - base[up])
+    base[small] -= drop[small] / (args.fade * fps)
+    base[big] -= drop[big] / (20 * fps)
 
 
 def pressure(raw, base):
@@ -244,11 +269,13 @@ def update(_):
         if state["base"] is None:
             state["calib"].append((chest, back))
             if len(state["calib"]) >= args.calib:
-                state["base"] = (np.mean([x[0] for x in state["calib"]], axis=0),
-                                 np.mean([x[1] for x in state["calib"]], axis=0))
+                state["base"] = [np.mean([x[0] for x in state["calib"]], axis=0),
+                                 np.mean([x[1] for x in state["calib"]], axis=0)]
             continue
         got = True
         for i, raw in enumerate((chest, back)):
+            if not args.no_drift:
+                track_baseline(i, raw)
             p = pressure(raw, state["base"][i])
             state["smooth"][i] = args.alpha * p + (1 - args.alpha) * state["smooth"][i]
 

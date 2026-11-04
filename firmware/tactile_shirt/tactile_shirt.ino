@@ -39,9 +39,11 @@ const uint8_t ROW_SEL[4] = {21, 22, 23, 14};  // row / ground mux S0-S3
 //   TRANSPOSED = 1: the row strips are on the COLUMN mux and the column
 //                   strips on the ROW mux (strips swapped between muxes).
 #if TWO_MUX
-const uint8_t TRANSPOSED[2] = {0, 0};
+// Measured with the channel finder (Nov 4): column strips are on the row mux
+// in reverse order, row strips are on the column mux.
+const uint8_t TRANSPOSED[2] = {1, 1};
 const uint8_t ROW_STRIP[2][ROWS] = {{0, 1, 2, 3, 4, 5}, {6, 7, 8, 9, 10, 11}};
-const uint8_t COL_STRIP[2][COLS] = {{0, 1, 2, 3, 4, 5, 6}, {7, 8, 9, 10, 11, 12, 13}};
+const uint8_t COL_STRIP[2][COLS] = {{6, 5, 4, 3, 2, 1, 0}, {13, 12, 11, 10, 9, 8, 7}};
 const uint8_t ADC_PIN[2] = {ADC_CHEST, ADC_CHEST};
 #else
 const uint8_t TRANSPOSED[2] = {0, 0};

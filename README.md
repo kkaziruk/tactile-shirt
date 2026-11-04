@@ -2,23 +2,32 @@
 
 Two 6×7 Velostat pressure grids (chest + back) read by an ESP32 through four CD74HC4067 multiplexers, with a live Python heatmap. Built for EE546 Emerging Interactive Technologies, Lab 6.
 
-Based on the course scanning and visualization code: https://github.com/WellingtonMiao/EE546-EMERGING-INTERACTIVE-TECHNOLOGIES, extended from one 4×4 sensor to two 6×7 sensors.
+Based on the course scanning and visualization code, with the two-mux layout and calibrated ADC reads from davmein0/sensor-voltage-visualizer: https://github.com/WellingtonMiao/EE546-EMERGING-INTERACTIVE-TECHNOLOGIES, extended from one 4×4 sensor to two 6×7 sensors.
 
 ## Wiring
 
-Each sensor uses the course schematic: one **sense mux** (MUX1) and one **ground mux** (MUX2).
+Set `TWO_MUX` at the top of the firmware to match how your board is built. Pins are the course defaults either way.
 
-| | Chest | Back |
+**`TWO_MUX 1` (default): 2 mux boards shared by both sensors**
+
+| Connection | ESP32 / destination |
+|---|---|
+| Column mux S0–S3 | GPIO 33, 25, 26, 27 |
+| Row mux S0–S3 | GPIO 21, 22, 23, 14 |
+| Column mux SIG | GPIO 36 (VP) + 660 Ω to 3V3 (not 5V) |
+| Row mux SIG | GND |
+| Both muxes VCC / GND / EN | 3V3 / GND / GND |
+
+| Sensor | Row mux channels | Column mux channels |
 |---|---|---|
-| Sense mux C0–C6 | 7 vertical strips | 7 vertical strips |
-| Sense mux S0–S3 | GPIO 33, 25, 26, 27 (shared) | same |
-| Sense mux SIG | GPIO 36 (VP) + 660 Ω to 3V3 | GPIO 39 (VN) + its own 660 Ω to 3V3 |
-| Ground mux C0–C5 | 6 horizontal strips | 6 horizontal strips |
-| Ground mux S0–S3 | GPIO 21, 22, 23, 14 (shared) | same |
-| Ground mux SIG | GND | GND |
-| EN / VCC | GND / 3V3 | GND / 3V3 |
+| Chest | C0–C5 | C0–C6 |
+| Back | C6–C11 | C7–C13 |
 
-The selected horizontal strip is grounded and the selected vertical strip is pulled up to 3.3 V, so the Velostat forms a voltage divider: unpressed reads near 3.3 V, and pressing lowers the voltage. If a strip is on a different mux channel, edit `ROW_CH` / `COL_CH` at the top of the firmware.
+**`TWO_MUX 0`: 4 mux boards (a row + column pair per sensor)**
+
+Both pairs share the select lines above and use rows C0–C5 / columns C0–C6. Chest column-mux SIG → GPIO 36, back column-mux SIG → GPIO 39 (VN), each with its own 660 Ω pull-up to 3V3. Row-mux SIG → GND, all EN → GND.
+
+The selected row is grounded and the selected column is pulled up to 3.3 V, so the Velostat forms a voltage divider: unpressed reads high, and pressing lowers the voltage. If a strip is on a different mux channel, edit `ROW_CH` / `COL_CH` in the firmware. The ESP32 ADC saturates a little above 3.1 V, so unpressed points may all read the same maximum.
 
 ## Fastest: flash from Chrome (no Arduino IDE)
 

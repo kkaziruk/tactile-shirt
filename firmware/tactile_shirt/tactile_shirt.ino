@@ -1,122 +1,123 @@
 // Tactile Exercise Shirt - ESP32 firmware (Lab 6)
-// Scans two 6x7 Velostat pressure grids (chest + back) with four
-// CD74HC4067 multiplexers, following the course schematic.
+// Scans two 6x7 Velostat pressure grids (chest + back) through CD74HC4067
+// multiplexers, following the course schematic, and streams each frame
+// over serial.
 //
-// Circuit (same as the course 4x4 schematic, done twice):
-//   SENSE mux (MUX1): C0-C6 -> the 7 vertical strips
-//                     SIG   -> ADC pin, and through 660 ohm resistor to 3V3
-//   GROUND mux (MUX2): C0-C5 -> the 6 horizontal strips
-//                      SIG   -> GND
-//   EN -> GND and VCC -> 3V3 on all four muxes.
+// Each sensor is read as a voltage divider:
+//   SENSE (column) mux SIG -> ADC pin, and through a 660 ohm resistor to 3V3
+//   GROUND (row) mux SIG   -> GND
+//   EN -> GND and VCC -> 3V3 on every mux
+// The selected row strip is grounded and the selected column strip is pulled
+// up, so  V_adc = 3.3 * R_velostat / (R_velostat + 660).
+// No pressure -> high resistance -> V near the top of the range.
+// Pressure    -> lower resistance -> V drops.
 //
-// The selected horizontal strip is grounded. The selected vertical strip
-// is pulled up to 3.3V through the 660 ohm resistor. The Velostat in
-// between forms a voltage divider:
-//   V_adc = 3.3 * R_velostat / (R_velostat + 660)
-// No pressure -> high Velostat resistance -> V_adc near 3.3V.
-// Pressure    -> lower resistance          -> V_adc drops.
-//
-// Both sense muxes share select lines, and both ground muxes share select
-// lines. The chest and back are separate circuits, so each scan step reads
-// the same (row, col) point on both sensors at once on two ADC pins.
+// ---------------- Pick your wiring ----------------
+// TWO_MUX = 1: both sensors share ONE column mux and ONE row mux (2 boards).
+//   Chest: rows on C0-C5,  columns on C0-C6
+//   Back:  rows on C6-C11, columns on C7-C13
+//   One ADC pin (GPIO36).
+// TWO_MUX = 0: each sensor has its own pair of muxes (4 boards).
+//   Both sensors use rows C0-C5 and columns C0-C6 on their own muxes.
+//   Select lines shared; chest on GPIO36, back on GPIO39, each with its
+//   own 660 ohm pull-up.
+#define TWO_MUX 1
 
-// ---------------- Pin map (course defaults) ----------------
-// Sense muxes (MUX1, chest + back), S0-S3
-#define SENSE_S0 33
-#define SENSE_S1 25
-#define SENSE_S2 26
-#define SENSE_S3 27
-// Ground muxes (MUX2, chest + back), S0-S3
-#define GND_S0 21
-#define GND_S1 22
-#define GND_S2 23
-#define GND_S3 14
+// ---------------- Pins (course defaults) ----------------
+const uint8_t COL_SEL[4] = {33, 25, 26, 27};  // column / sense mux S0-S3
+const uint8_t ROW_SEL[4] = {21, 22, 23, 14};  // row / ground mux S0-S3
+#define ADC_CHEST 36  // VP
+#define ADC_BACK  39  // VN (only used when TWO_MUX = 0)
 
-#define ADC_CHEST 36  // VP pin: SIG of chest sense mux (ADC1_CH0)
-#define ADC_BACK  39  // VN pin: SIG of back sense mux  (ADC1_CH3)
+#define ROWS 6
+#define COLS 7
 
-// ---------------- Grid ----------------
-#define NUM_ROWS 6  // horizontal strips -> ground mux
-#define NUM_COLS 7  // vertical strips   -> sense mux
-
-// Mux channel (0-15) each strip is soldered to, in physical order.
-// If a strip is on a different channel, change it here instead of rewiring.
-const int ROW_CH[NUM_ROWS] = {0, 1, 2, 3, 4, 5};
-const int COL_CH[NUM_COLS] = {0, 1, 2, 3, 4, 5, 6};
+// Mux channel each strip is soldered to, [sensor][strip]. Edit to match.
+#if TWO_MUX
+const uint8_t ROW_CH[2][ROWS] = {{0, 1, 2, 3, 4, 5}, {6, 7, 8, 9, 10, 11}};
+const uint8_t COL_CH[2][COLS] = {{0, 1, 2, 3, 4, 5, 6}, {7, 8, 9, 10, 11, 12, 13}};
+const uint8_t ADC_PIN[2] = {ADC_CHEST, ADC_CHEST};
+#else
+const uint8_t ROW_CH[2][ROWS] = {{0, 1, 2, 3, 4, 5}, {0, 1, 2, 3, 4, 5}};
+const uint8_t COL_CH[2][COLS] = {{0, 1, 2, 3, 4, 5, 6}, {0, 1, 2, 3, 4, 5, 6}};
+const uint8_t ADC_PIN[2] = {ADC_CHEST, ADC_BACK};
+#endif
 
 // ---------------- Settings ----------------
-#define BAUD_RATE 250000         // same as the course code
-#define SAMPLES_PER_POINT 3      // averaged per intersection
-#define SETTLE_US 100            // wait after switching a channel
-#define SCAN_DELAY_MS 10         // pause between frames
+#define BAUD_RATE 250000
+#define SAMPLES 3            // averaged per intersection
+#define SETTLE_US 300        // wait after switching a mux channel
+#define SCAN_DELAY_MS 10     // pause between frames
 
-float chest[NUM_ROWS][NUM_COLS];
-float back[NUM_ROWS][NUM_COLS];
+float volts[2][ROWS][COLS];
 
-// Set S0-S3 to the 4-bit binary value of ch (0-15). S0 is the LSB.
-void selectChannel(int s0, int s1, int s2, int s3, int ch) {
-  digitalWrite(s0, ch & 0x01);
-  digitalWrite(s1, (ch >> 1) & 0x01);
-  digitalWrite(s2, (ch >> 2) & 0x01);
-  digitalWrite(s3, (ch >> 3) & 0x01);
+void selectChannel(const uint8_t pins[4], uint8_t ch) {
+  for (uint8_t b = 0; b < 4; b++) digitalWrite(pins[b], (ch >> b) & 1);
 }
 
-// Averaged reading in volts. The first read after a switch is discarded:
-// the ADC's sample capacitor still holds charge from the previous point.
-float readVoltage(int pin) {
+// Calibrated reading in volts. The first conversion after a switch is
+// discarded: the ADC's sample capacitor still holds the previous point.
+float readVolts(uint8_t pin) {
   analogRead(pin);
-  float sum = 0;
-  for (int i = 0; i < SAMPLES_PER_POINT; i++) {
-    sum += analogRead(pin) * (3.3 / 4095.0);
-  }
-  return sum / SAMPLES_PER_POINT;
+  uint32_t mv = 0;
+  for (uint8_t i = 0; i < SAMPLES; i++) mv += analogReadMilliVolts(pin);
+  return mv / (1000.0f * SAMPLES);
 }
 
-void scanMatrices() {
-  for (int r = 0; r < NUM_ROWS; r++) {
-    selectChannel(GND_S0, GND_S1, GND_S2, GND_S3, ROW_CH[r]);      // ground one row
-    for (int c = 0; c < NUM_COLS; c++) {
-      selectChannel(SENSE_S0, SENSE_S1, SENSE_S2, SENSE_S3, COL_CH[c]);  // sense one column
-      delayMicroseconds(SETTLE_US);
-      chest[r][c] = readVoltage(ADC_CHEST);
-      back[r][c]  = readVoltage(ADC_BACK);
+void scan() {
+#if TWO_MUX
+  // Shared muxes: scan the sensors one after the other.
+  for (uint8_t s = 0; s < 2; s++) {
+    for (uint8_t r = 0; r < ROWS; r++) {
+      selectChannel(ROW_SEL, ROW_CH[s][r]);
+      for (uint8_t c = 0; c < COLS; c++) {
+        selectChannel(COL_SEL, COL_CH[s][c]);
+        delayMicroseconds(SETTLE_US);
+        volts[s][r][c] = readVolts(ADC_PIN[s]);
+      }
     }
   }
+#else
+  // Separate muxes on shared select lines: read both sensors at once.
+  for (uint8_t r = 0; r < ROWS; r++) {
+    selectChannel(ROW_SEL, ROW_CH[0][r]);
+    for (uint8_t c = 0; c < COLS; c++) {
+      selectChannel(COL_SEL, COL_CH[0][c]);
+      delayMicroseconds(SETTLE_US);
+      volts[0][r][c] = readVolts(ADC_PIN[0]);
+      volts[1][r][c] = readVolts(ADC_PIN[1]);
+    }
+  }
+#endif
 }
 
 // One frame per line:
-// F,<ms since boot>,<42 chest volts, row by row>,<42 back volts, row by row>
+// F,<ms since boot>,<42 chest volts row by row>,<42 back volts row by row>
 void sendFrame() {
   Serial.print("F,");
   Serial.print(millis());
-  for (int r = 0; r < NUM_ROWS; r++)
-    for (int c = 0; c < NUM_COLS; c++) {
-      Serial.print(',');
-      Serial.print(chest[r][c], 3);
-    }
-  for (int r = 0; r < NUM_ROWS; r++)
-    for (int c = 0; c < NUM_COLS; c++) {
-      Serial.print(',');
-      Serial.print(back[r][c], 3);
-    }
+  for (uint8_t s = 0; s < 2; s++)
+    for (uint8_t r = 0; r < ROWS; r++)
+      for (uint8_t c = 0; c < COLS; c++) {
+        Serial.print(',');
+        Serial.print(volts[s][r][c], 3);
+      }
   Serial.println();
 }
 
 void setup() {
   Serial.begin(BAUD_RATE);
-
-  int pins[] = {SENSE_S0, SENSE_S1, SENSE_S2, SENSE_S3,
-                GND_S0, GND_S1, GND_S2, GND_S3};
-  for (int i = 0; i < 8; i++) pinMode(pins[i], OUTPUT);
-
-  analogReadResolution(12);        // 0-4095
-  analogSetAttenuation(ADC_11db);  // full 0-3.3V input range
-
+  for (uint8_t b = 0; b < 4; b++) {
+    pinMode(COL_SEL[b], OUTPUT);
+    pinMode(ROW_SEL[b], OUTPUT);
+  }
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);  // ~0-3.1 V usable range
   Serial.println("Initialization complete, starting matrix scan...");
 }
 
 void loop() {
-  scanMatrices();
+  scan();
   sendFrame();
   delay(SCAN_DELAY_MS);
 }

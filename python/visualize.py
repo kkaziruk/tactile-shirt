@@ -117,6 +117,8 @@ state = {
     "values": True,
     "blocky": True,
     "frozen": False,
+    "timer_end": None,     # when the 5 s reading timer fires
+    "grids": None,         # latest displayed grids
     "disconnected": False,
 }
 hist_t = deque()
@@ -180,7 +182,7 @@ CMAP = LinearSegmentedColormap.from_list(
 
 fig = plt.figure(figsize=(13, 6), facecolor=BG)
 fig.canvas.manager.set_window_title("Tactile Shirt - live")
-gs = GridSpec(1, 2, figure=fig, wspace=0.12, left=0.05, right=0.97, top=0.86, bottom=0.13)
+gs = GridSpec(1, 2, figure=fig, wspace=0.12, left=0.05, right=0.97, top=0.84, bottom=0.13)
 title = fig.suptitle("", color=FG, fontsize=15, fontweight="bold")
 
 views = []
@@ -210,7 +212,7 @@ for i, name in enumerate(["CHEST", "BACK"]):
     views.append(dict(ax=ax, im=im, ring=ring, peak=peak, cells=cells))
 
 status = fig.text(0.05, 0.015, "", color=DIM, fontsize=9)
-fig.text(0.97, 0.015, "c / button recalibrate · v values · s smooth/blocky · f freeze",
+fig.text(0.97, 0.015, "keys: c · t · v · s · f",
          color=DIM, fontsize=9, ha="right")
 
 
@@ -223,6 +225,8 @@ def on_key(event):
         state["blocky"] = not state["blocky"]
         for v in views:
             v["im"].set_interpolation("nearest" if state["blocky"] else "bicubic")
+    elif event.key == "t":
+        start_timer()
     elif event.key == "f":
         state["frozen"] = not state["frozen"]
 
@@ -231,11 +235,59 @@ fig.canvas.mpl_connect("key_press_event", on_key)
 
 # Recalibrate button (same as pressing c). Take everything off the sensors first.
 from matplotlib.widgets import Button
-btn_ax = fig.add_axes([0.44, 0.01, 0.12, 0.055])
+btn_ax = fig.add_axes([0.355, 0.015, 0.13, 0.055])
 recal_btn = Button(btn_ax, "Recalibrate", color="#1565c0", hovercolor="#1fa2a8")
 recal_btn.label.set_color("white")
 recal_btn.label.set_fontweight("bold")
 recal_btn.on_clicked(lambda _event: start_calibration())
+
+# 5-second reading timer: place the weight, click, and it reports the reading
+# of the most-pressed cell on each sensor after exactly TIMER_S seconds.
+TIMER_S = 5
+
+
+def start_timer(_event=None):
+    if state["base"] is not None:
+        state["timer_end"] = time.time() + TIMER_S
+        result.set_text("")
+
+
+timer_ax = fig.add_axes([0.515, 0.015, 0.13, 0.055])
+timer_btn = Button(timer_ax, f"{TIMER_S} s reading", color="#1fa2a8", hovercolor="#3ddc84")
+timer_btn.label.set_color("white")
+timer_btn.label.set_fontweight("bold")
+timer_btn.on_clicked(start_timer)
+
+countdown = fig.text(0.5, 0.905, "", color="#ffd166", fontsize=13, fontweight="bold",
+                     ha="center")
+result = fig.text(0.5, 0.905, "", color="#3ddc84", fontsize=12, fontweight="bold",
+                  ha="center",
+                  bbox=dict(boxstyle="round,pad=0.4", fc="#000000cc", ec="#3ddc84"))
+
+
+def take_reading(grids):
+    parts = []
+    for name, g in zip(["CHEST", "BACK"], grids):
+        r, c = np.unravel_index(np.argmax(g), g.shape)
+        parts.append(f"{name} R{r + 1}C{c + 1} = {g[r, c]:.2f} V" if g[r, c] > 0
+                     else f"{name}: no contact")
+    line = "   |   ".join(parts)
+    result.set_text(f"{TIMER_S} s reading:  {line}")
+    print(f"[{time.strftime('%H:%M:%S')}] {TIMER_S} s reading: {line}", flush=True)
+
+
+def update_timer(now):
+    end = state["timer_end"]
+    if end is None:
+        countdown.set_text("")
+        return
+    if now < end:
+        countdown.set_text(f"Reading in {end - now:.1f} s ... hold still")
+        return
+    state["timer_end"] = None
+    countdown.set_text("")
+    if state["grids"] is not None:
+        take_reading(state["grids"])
 
 
 def update(_):
@@ -275,10 +327,12 @@ def update(_):
     title.set_text("LIVE" if not state["frozen"] else "FROZEN (press f)")
     title.set_color("#06d6a0" if not state["frozen"] else "#ffd166")
     status.set_text(f"{len(arrivals)} frames/s")
+    update_timer(now)
     if not got or state["frozen"]:
         return
 
     grids = [np.fliplr(g) if flip[i] else g for i, g in enumerate(state["smooth"])]
+    state["grids"] = [g.copy() for g in grids]
 
     # Auto-brightness: color ceiling follows the strongest recent press.
     if args.vmax:

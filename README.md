@@ -50,7 +50,7 @@ Options: `--flip-chest` / `--flip-back` to mirror a heatmap, `--log reps.csv --l
 
 ![Dashboard](docs/dashboard.png)
 
-Blue-to-green heatmaps on a cell grid with the value in every cell, auto-brightness and center of pressure (ring). Recalibrate button (or `c`), `v` show cell values, `s` smooth/blocky, `f` freeze.
+Blue-to-green heatmaps on a cell grid with the value in every cell, auto-brightness and center of pressure (ring). Recalibrate button (or `c`), 5 s reading button (or `t`): reports the most-pressed cell on each sensor 5 s after you click and prints it in Terminal,, `v` show cell values, `s` smooth/blocky, `f` freeze.
 
 ## Data format
 

@@ -5,7 +5,6 @@ Shows, for the chest and back sensors:
   - smooth pressure heatmap (auto-brightness, so light presses still show)
   - center of pressure (cyan ring)
   - left / right balance bar
-  - total pressure over the last 10 seconds (one bump per rep)
 
 Keys (click the window first):
   c  recalibrate (take hands off the sensors first)
@@ -31,6 +30,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import serial
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.gridspec import GridSpec
 
 ROWS, COLS = 6, 7
@@ -115,8 +115,8 @@ state = {
     "calib": [],           # frames collected while calibrating
     "smooth": [np.zeros((ROWS, COLS)), np.zeros((ROWS, COLS))],
     "scale": args.vmin_scale,
-    "values": False,
-    "blocky": False,
+    "values": True,
+    "blocky": True,
     "frozen": False,
     "disconnected": False,
 }
@@ -175,31 +175,38 @@ def left_share(p):
 plt.rcParams.update({"font.size": 11, "axes.titleweight": "bold"})
 BG, FG, DIM = "#0f1115", "#e8e8ea", "#8a8f98"
 COLORS = ["#4cc9f0", "#f72585"]  # chest, back
+# Blue -> green: navy when untouched, through blue and teal, to green at max press
+CMAP = LinearSegmentedColormap.from_list(
+    "bluegreen", ["#0b1f3a", "#1565c0", "#1fa2a8", "#3ddc84"])
 
-fig = plt.figure(figsize=(13, 8.5), facecolor=BG)
+fig = plt.figure(figsize=(13, 6.5), facecolor=BG)
 fig.canvas.manager.set_window_title("Tactile Shirt - live")
-gs = GridSpec(3, 2, figure=fig, height_ratios=[5, 0.35, 2.2],
-              hspace=0.45, wspace=0.12, left=0.05, right=0.97, top=0.9, bottom=0.07)
+gs = GridSpec(2, 2, figure=fig, height_ratios=[5, 0.35],
+              hspace=0.3, wspace=0.12, left=0.05, right=0.97, top=0.9, bottom=0.08)
 title = fig.suptitle("", color=FG, fontsize=15, fontweight="bold")
 
 views = []
 for i, name in enumerate(["CHEST", "BACK"]):
     ax = fig.add_subplot(gs[0, i])
     ax.set_facecolor(BG)
-    im = ax.imshow(np.zeros((ROWS, COLS)), cmap="magma", vmin=0, vmax=state["scale"],
-                   interpolation="bicubic", aspect="equal")
+    im = ax.imshow(np.zeros((ROWS, COLS)), cmap=CMAP, vmin=0, vmax=state["scale"],
+                   interpolation="nearest", aspect="equal")
     ax.set_title(name, color=COLORS[i], fontsize=14, pad=8)
     ax.set_xticks(range(COLS), [f"C{c + 1}" for c in range(COLS)], color=DIM, fontsize=9)
     ax.set_yticks(range(ROWS), [f"R{r + 1}" for r in range(ROWS)], color=DIM, fontsize=9)
     ax.tick_params(length=0)
     for s in ax.spines.values():
         s.set_color("#2a2e36")
-    ax.axvline((COLS - 1) / 2, color="white", ls=(0, (3, 4)), lw=0.8, alpha=0.4)
+    # Cell grid
+    ax.set_xticks(np.arange(-0.5, COLS, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, ROWS, 1), minor=True)
+    ax.grid(which="minor", color="white", lw=1.2, alpha=0.6)
+    ax.tick_params(which="minor", length=0)
     (ring,) = ax.plot([], [], "o", ms=22, mfc="none", mec="#00f5d4", mew=3)
-    peak = ax.text(0.98, 0.02, "", transform=ax.transAxes, ha="right", va="bottom",
+    peak = ax.text(1.0, 1.02, "", transform=ax.transAxes, ha="right", va="bottom",
                    color=FG, fontsize=10,
                    bbox=dict(boxstyle="round,pad=0.3", fc="#000000aa", ec="none"))
-    cells = [[ax.text(c, r, "", ha="center", va="center", fontsize=8, color="white")
+    cells = [[ax.text(c, r, "", ha="center", va="center", fontsize=9, fontweight="bold", color="white")
               for c in range(COLS)] for r in range(ROWS)]
 
     # Left/right balance bar
@@ -218,22 +225,6 @@ for i, name in enumerate(["CHEST", "BACK"]):
                    fontweight="bold")
     views.append(dict(ax=ax, im=im, ring=ring, peak=peak, cells=cells,
                       lbar=lbar, rbar=rbar, btxt=btxt))
-
-# Total pressure over time
-tx = fig.add_subplot(gs[2, :])
-tx.set_facecolor("#15181e")
-for s in tx.spines.values():
-    s.set_color("#2a2e36")
-tx.tick_params(colors=DIM, labelsize=9)
-tx.set_xlim(-HISTORY_S, 0)
-tx.set_ylim(0, 1)
-tx.set_xlabel("seconds", color=DIM, fontsize=9)
-tx.set_ylabel("total pressure (V)", color=DIM, fontsize=9)
-tx.grid(color="#2a2e36", lw=0.6)
-lines = [tx.plot([], [], color=COLORS[i], lw=2.2, label=n)[0]
-         for i, n in enumerate(["chest", "back"])]
-tx.legend(loc="upper left", facecolor="#15181e", edgecolor="#2a2e36", labelcolor=FG,
-          fontsize=9)
 
 status = fig.text(0.05, 0.015, "", color=DIM, fontsize=9)
 fig.text(0.97, 0.015, "c recalibrate · v values · s smooth/blocky · f freeze",
@@ -307,14 +298,6 @@ def update(_):
         scale = state["scale"] + (0.3 if target > state["scale"] else 0.03) * (target - state["scale"])
         state["scale"] = scale
 
-    hist_t.append(now)
-    for i, g in enumerate(grids):
-        hist[i].append(g.sum())
-    while hist_t and hist_t[0] < now - HISTORY_S:
-        hist_t.popleft()
-        for h in hist:
-            h.popleft()
-
     for i, (v, g) in enumerate(zip(views, grids)):
         v["im"].set_data(g)
         v["im"].set_clim(0, scale)
@@ -323,8 +306,10 @@ def update(_):
         v["peak"].set_text(f"peak {g.max():.2f} V" if g.max() > 0 else "no contact")
         for r in range(ROWS):
             for c in range(COLS):
-                v["cells"][r][c].set_text(
-                    f"{g[r, c]:.2f}" if state["values"] and g[r, c] > 0 else "")
+                t = v["cells"][r][c]
+                t.set_text(f"{g[r, c]:.2f}" if state["values"] else "")
+                # dark text on the bright (yellow/green) cells, white on dark
+                t.set_color("black" if g[r, c] > 0.6 * scale else "white")
         share = left_share(g)
         if share is None:
             v["lbar"].set_width(0)
@@ -336,15 +321,6 @@ def update(_):
             v["rbar"].set_x(share)
             v["rbar"].set_width(1 - share)
             v["btxt"].set_text(f"L {share * 100:.0f}%   |   R {(1 - share) * 100:.0f}%")
-
-    ts = np.array(hist_t) - now
-    top = 0.2
-    for i, line in enumerate(lines):
-        y = np.array(hist[i])
-        line.set_data(ts, y)
-        if len(y):
-            top = max(top, y.max() * 1.2)
-    tx.set_ylim(0, top)
 
 
 ani = FuncAnimation(fig, update, interval=40, cache_frame_data=False)

@@ -50,7 +50,7 @@ Options: `--flip-chest` / `--flip-back` to mirror a heatmap, `--log reps.csv --l
 
 ![Dashboard](docs/dashboard.png)
 
-Smooth heatmaps with auto-brightness, center of pressure (ring), left/right balance bars, and total pressure over the last 10 s (one bump per rep). Keys: `c` recalibrate, `v` show cell values, `s` smooth/blocky, `f` freeze.
+Blue-to-green heatmaps on a cell grid with the value in every cell, auto-brightness, center of pressure (ring) and left/right balance bars. Keys: `c` recalibrate, `v` show cell values, `s` smooth/blocky, `f` freeze.
 
 ## Data format
 

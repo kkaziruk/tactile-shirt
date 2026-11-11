@@ -4,7 +4,6 @@ Tactile Exercise Shirt - live dashboard + data logging.
 Shows, for the chest and back sensors:
   - smooth pressure heatmap (auto-brightness, so light presses still show)
   - center of pressure (cyan ring)
-  - left / right balance bar
 
 Keys (click the window first):
   c  recalibrate (take hands off the sensors first)
@@ -179,10 +178,9 @@ COLORS = ["#4cc9f0", "#f72585"]  # chest, back
 CMAP = LinearSegmentedColormap.from_list(
     "bluegreen", ["#0b1f3a", "#1565c0", "#1fa2a8", "#3ddc84"])
 
-fig = plt.figure(figsize=(13, 6.5), facecolor=BG)
+fig = plt.figure(figsize=(13, 6), facecolor=BG)
 fig.canvas.manager.set_window_title("Tactile Shirt - live")
-gs = GridSpec(2, 2, figure=fig, height_ratios=[5, 0.35],
-              hspace=0.3, wspace=0.12, left=0.05, right=0.97, top=0.9, bottom=0.08)
+gs = GridSpec(1, 2, figure=fig, wspace=0.12, left=0.05, right=0.97, top=0.86, bottom=0.08)
 title = fig.suptitle("", color=FG, fontsize=15, fontweight="bold")
 
 views = []
@@ -209,22 +207,7 @@ for i, name in enumerate(["CHEST", "BACK"]):
     cells = [[ax.text(c, r, "", ha="center", va="center", fontsize=9, fontweight="bold", color="white")
               for c in range(COLS)] for r in range(ROWS)]
 
-    # Left/right balance bar
-    bx = fig.add_subplot(gs[1, i])
-    bx.set_facecolor("#1b1e24")
-    bx.set_xlim(0, 1)
-    bx.set_ylim(0, 1)
-    bx.set_xticks([])
-    bx.set_yticks([])
-    for s in bx.spines.values():
-        s.set_visible(False)
-    lbar = bx.barh(0.5, 0.5, height=1, color=COLORS[i], alpha=0.85, left=0)[0]
-    rbar = bx.barh(0.5, 0.5, height=1, color="#3a3f4b", left=0.5)[0]
-    bx.axvline(0.5, color="white", lw=1.5)
-    btxt = bx.text(0.5, 0.5, "", ha="center", va="center", color=FG, fontsize=11,
-                   fontweight="bold")
-    views.append(dict(ax=ax, im=im, ring=ring, peak=peak, cells=cells,
-                      lbar=lbar, rbar=rbar, btxt=btxt))
+    views.append(dict(ax=ax, im=im, ring=ring, peak=peak, cells=cells))
 
 status = fig.text(0.05, 0.015, "", color=DIM, fontsize=9)
 fig.text(0.97, 0.015, "c recalibrate · v values · s smooth/blocky · f freeze",
@@ -310,17 +293,6 @@ def update(_):
                 t.set_text(f"{g[r, c]:.2f}" if state["values"] else "")
                 # dark text on the bright (yellow/green) cells, white on dark
                 t.set_color("black" if g[r, c] > 0.6 * scale else "white")
-        share = left_share(g)
-        if share is None:
-            v["lbar"].set_width(0)
-            v["rbar"].set_x(0)
-            v["rbar"].set_width(1)
-            v["btxt"].set_text("no contact")
-        else:
-            v["lbar"].set_width(share)
-            v["rbar"].set_x(share)
-            v["rbar"].set_width(1 - share)
-            v["btxt"].set_text(f"L {share * 100:.0f}%   |   R {(1 - share) * 100:.0f}%")
 
 
 ani = FuncAnimation(fig, update, interval=40, cache_frame_data=False)

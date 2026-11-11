@@ -50,7 +50,7 @@ Options: `--flip-chest` / `--flip-back` to mirror a heatmap, `--log reps.csv --l
 
 ![Dashboard](docs/dashboard.png)
 
-Blue-to-green heatmaps on a cell grid with the value in every cell, auto-brightness, center of pressure (ring) and left/right balance bars. Keys: `c` recalibrate, `v` show cell values, `s` smooth/blocky, `f` freeze.
+Blue-to-green heatmaps on a cell grid with the value in every cell, auto-brightness and center of pressure (ring). Keys: `c` recalibrate, `v` show cell values, `s` smooth/blocky, `f` freeze.
 
 ## Data format
 

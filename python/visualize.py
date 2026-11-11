@@ -180,7 +180,7 @@ CMAP = LinearSegmentedColormap.from_list(
 
 fig = plt.figure(figsize=(13, 6), facecolor=BG)
 fig.canvas.manager.set_window_title("Tactile Shirt - live")
-gs = GridSpec(1, 2, figure=fig, wspace=0.12, left=0.05, right=0.97, top=0.86, bottom=0.08)
+gs = GridSpec(1, 2, figure=fig, wspace=0.12, left=0.05, right=0.97, top=0.86, bottom=0.13)
 title = fig.suptitle("", color=FG, fontsize=15, fontweight="bold")
 
 views = []
@@ -210,7 +210,7 @@ for i, name in enumerate(["CHEST", "BACK"]):
     views.append(dict(ax=ax, im=im, ring=ring, peak=peak, cells=cells))
 
 status = fig.text(0.05, 0.015, "", color=DIM, fontsize=9)
-fig.text(0.97, 0.015, "c recalibrate · v values · s smooth/blocky · f freeze",
+fig.text(0.97, 0.015, "c / button recalibrate · v values · s smooth/blocky · f freeze",
          color=DIM, fontsize=9, ha="right")
 
 
@@ -228,6 +228,14 @@ def on_key(event):
 
 
 fig.canvas.mpl_connect("key_press_event", on_key)
+
+# Recalibrate button (same as pressing c). Take everything off the sensors first.
+from matplotlib.widgets import Button
+btn_ax = fig.add_axes([0.44, 0.01, 0.12, 0.055])
+recal_btn = Button(btn_ax, "Recalibrate", color="#1565c0", hovercolor="#1fa2a8")
+recal_btn.label.set_color("white")
+recal_btn.label.set_fontweight("bold")
+recal_btn.on_clicked(lambda _event: start_calibration())
 
 
 def update(_):

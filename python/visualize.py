@@ -53,9 +53,21 @@ ap.add_argument("--vmin-scale", type=float, default=0.15,
 ap.add_argument("--vmax", type=float, default=None, help="fixed color ceiling (V), disables auto")
 ap.add_argument("--flip-chest", action="store_true", help="mirror chest left/right")
 ap.add_argument("--flip-back", action="store_true", help="mirror back left/right")
+ap.add_argument("--raw", action="store_true",
+                help="show the actual pin voltage (0-3.3 V, drops when pressed), like the course code")
+ap.add_argument("--cell", default=None,
+                help="cell the 5 s reading reports, e.g. R3C4 (default: most-pressed cell)")
 ap.add_argument("--log", help="CSV file to append raw frames to")
 ap.add_argument("--label", default="", help="label saved with each logged frame")
 args = ap.parse_args()
+
+FIXED_CELL = None
+if args.cell:
+    import re
+    m = re.fullmatch(r"[Rr](\d)[Cc](\d)", args.cell.strip())
+    if not m or not (1 <= int(m[1]) <= 6 and 1 <= int(m[2]) <= 7):
+        ap.error("--cell must look like R3C4 (rows 1-6, columns 1-7)")
+    FIXED_CELL = (int(m[1]) - 1, int(m[2]) - 1)
 
 ser = serial.Serial(args.port, args.baud, timeout=0.1)
 time.sleep(2)  # the ESP32 resets when the port opens
@@ -113,6 +125,9 @@ state = {
     "base": None,          # (chest, back) baselines
     "calib": [],           # frames collected while calibrating
     "smooth": [np.zeros((ROWS, COLS)), np.zeros((ROWS, COLS))],
+    "rawsmooth": None,     # smoothed actual pin voltages
+    "raw": args.raw,       # True: show actual pin voltage
+    "rawgrids": None,      # latest displayed raw grids
     "scale": args.vmin_scale,
     "values": True,
     "blocky": True,
@@ -212,8 +227,29 @@ for i, name in enumerate(["CHEST", "BACK"]):
     views.append(dict(ax=ax, im=im, ring=ring, peak=peak, cells=cells))
 
 status = fig.text(0.05, 0.015, "", color=DIM, fontsize=9)
-fig.text(0.97, 0.015, "keys: c · t · v · s · f",
+fig.text(0.97, 0.015, "keys: c · t · r · v · s · f",
          color=DIM, fontsize=9, ha="right")
+
+
+RAW_MAX = 3.3
+
+
+def apply_mode():
+    """Switch colormap and labels between voltage-drop and raw-voltage view."""
+    for v in views:
+        v["im"].set_cmap(CMAP.reversed() if state["raw"] else CMAP)
+    mode_txt.set_text("RAW pin voltage (drops when pressed)  ·  r to switch"
+                      if state["raw"] else
+                      "Voltage drop from baseline (rises when pressed)  ·  r to switch")
+
+
+mode_txt = fig.text(0.05, 0.955, "", color=DIM, fontsize=9)
+if FIXED_CELL:
+    from matplotlib.patches import Rectangle
+    for v in views:
+        v["ax"].add_patch(Rectangle((FIXED_CELL[1] - 0.5, FIXED_CELL[0] - 0.5), 1, 1,
+                                    fill=False, ec="#ffd166", lw=3, zorder=5))
+apply_mode()
 
 
 def on_key(event):
@@ -225,6 +261,9 @@ def on_key(event):
         state["blocky"] = not state["blocky"]
         for v in views:
             v["im"].set_interpolation("nearest" if state["blocky"] else "bicubic")
+    elif event.key == "r":
+        state["raw"] = not state["raw"]
+        apply_mode()
     elif event.key == "t":
         start_timer()
     elif event.key == "f":
@@ -266,11 +305,20 @@ result = fig.text(0.5, 0.905, "", color="#3ddc84", fontsize=12, fontweight="bold
 
 
 def take_reading(grids):
+    """Report one cell per sensor: the --cell one, else the most-pressed one.
+    Raw mode reports the actual pin voltage; otherwise the drop from baseline."""
     parts = []
-    for name, g in zip(["CHEST", "BACK"], grids):
-        r, c = np.unravel_index(np.argmax(g), g.shape)
-        parts.append(f"{name} R{r + 1}C{c + 1} = {g[r, c]:.2f} V" if g[r, c] > 0
-                     else f"{name}: no contact")
+    for i, (name, g) in enumerate(zip(["CHEST", "BACK"], grids)):
+        if FIXED_CELL:
+            r, c = FIXED_CELL
+        else:
+            r, c = np.unravel_index(np.argmax(g), g.shape)
+        if state["raw"] and state["rawgrids"] is not None:
+            parts.append(f"{name} R{r + 1}C{c + 1} = {state['rawgrids'][i][r, c]:.3f} V")
+        elif FIXED_CELL or g[r, c] > 0:
+            parts.append(f"{name} R{r + 1}C{c + 1} = {g[r, c]:.2f} V drop")
+        else:
+            parts.append(f"{name}: no contact")
     line = "   |   ".join(parts)
     result.set_text(f"{TIMER_S} s reading:  {line}")
     print(f"[{time.strftime('%H:%M:%S')}] {TIMER_S} s reading: {line}", flush=True)
@@ -307,7 +355,10 @@ def update(_):
                                  np.mean([x[1] for x in state["calib"]], axis=0)]
             continue
         got = True
+        if state["rawsmooth"] is None:
+            state["rawsmooth"] = [chest.copy(), back.copy()]
         for i, raw in enumerate((chest, back)):
+            state["rawsmooth"][i] = args.alpha * raw + (1 - args.alpha) * state["rawsmooth"][i]
             if not args.no_drift:
                 track_baseline(i, raw)
             p = pressure(raw, state["base"][i])
@@ -333,6 +384,8 @@ def update(_):
 
     grids = [np.fliplr(g) if flip[i] else g for i, g in enumerate(state["smooth"])]
     state["grids"] = [g.copy() for g in grids]
+    rawgrids = [np.fliplr(g) if flip[i] else g for i, g in enumerate(state["rawsmooth"])]
+    state["rawgrids"] = [g.copy() for g in rawgrids]
 
     # Auto-brightness: color ceiling follows the strongest recent press.
     if args.vmax:
@@ -344,17 +397,33 @@ def update(_):
         state["scale"] = scale
 
     for i, (v, g) in enumerate(zip(views, grids)):
-        v["im"].set_data(g)
-        v["im"].set_clim(0, scale)
+        if state["raw"]:
+            shown = rawgrids[i]
+            # Low voltage = pressed, so the reversed colormap still lights it up
+            # Color range stretches down to the lowest reading so presses stand out
+            lo = min(2.0, shown.min() - 0.1)
+            bright = (RAW_MAX - shown) / (RAW_MAX - lo)
+            v["im"].set_data(shown)
+            v["im"].set_clim(lo, RAW_MAX)
+            v["peak"].set_text(f"min {shown.min():.2f} V")
+            fmt = "{:.2f}"
+        else:
+            shown = g
+            bright = g / scale
+            v["im"].set_data(g)
+            v["im"].set_clim(0, scale)
+            v["peak"].set_text(f"peak {g.max():.2f} V" if g.max() > 0 else "no contact")
+            fmt = "{:.2f}"
         cop = center_of_pressure(g)
         v["ring"].set_data(([cop[0]], [cop[1]]) if cop else ([], []))
-        v["peak"].set_text(f"peak {g.max():.2f} V" if g.max() > 0 else "no contact")
         for r in range(ROWS):
             for c in range(COLS):
                 t = v["cells"][r][c]
-                t.set_text(f"{g[r, c]:.2f}" if state["values"] else "")
-                # dark text on the bright (yellow/green) cells, white on dark
-                t.set_color("black" if g[r, c] > 0.6 * scale else "white")
+                t.set_text(fmt.format(shown[r, c]) if state["values"] else "")
+                # dark text on the bright (green) cells, white on dark
+                t.set_color("black" if bright[r, c] > 0.6 else "white")
+                if FIXED_CELL == (r, c):
+                    t.set_fontsize(10)
 
 
 ani = FuncAnimation(fig, update, interval=40, cache_frame_data=False)

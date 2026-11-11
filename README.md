@@ -44,7 +44,7 @@ The selected row is grounded and the selected column is pulled up to 3.3 V, so t
 4. `python python/visualize.py COM3` (Mac: `/dev/cu.usbserial-XXXX`)
 5. Keep both sensors unloaded for ~2 s while it calibrates.
 
-Options: `--flip-chest` / `--flip-back` to mirror a heatmap, `--log reps.csv --label wide_grip` to save labeled frames, `--no-values` to hide cell numbers.
+Options: `--raw` to show the actual pin voltage (drops when pressed, like the course code; `r` toggles), `--cell R3C4` to make the 5 s reading always report that cell, `--flip-chest` / `--flip-back` to mirror a heatmap, `--log reps.csv --label wide_grip` to save labeled frames, `--no-values` to hide cell numbers.
 
 ## Dashboard
 
